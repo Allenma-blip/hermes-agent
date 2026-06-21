@@ -57,8 +57,8 @@ async def run_review(
     if md_path is None:
         return Path(), Path(), "success", "✅ Codex 执行完成，无变更", None
 
-    # 3. 评分
-    score = _run_codex_review(md_path)
+    # 3. 评分（传用户原始指令，用于相关性检查）
+    score = _run_codex_review(md_path, prompt)
     if score is None:
         return (
             md_path, patch_path, "success",
@@ -146,17 +146,27 @@ def _extract_diff(
     return (md_path if md_path.exists() else None), patch_path
 
 
-def _run_codex_review(review_file: Path) -> float | None:
+HERMES_BIN = os.path.expanduser("~/hermes-source/venv/bin/hermes")
+
+
+def _run_codex_review(review_file: Path, user_prompt: str = "") -> float | None:
     try:
         content = review_file.read_text()
     except OSError:
         return None
 
+    # 用 Hermes fallback 链审核，不硬绑模型，禁工具防止文件修改
+    review_prompt = (
+        f"用户指令：{user_prompt}\n\n"
+        f"代码变更：\n{content}\n\n"
+        f"评分标准 (0-10分)：\n"
+        f"- 产出是否与用户指令直接相关（无关=0分，完全匹配=高分）\n"
+        f"- 代码质量和正确性\n"
+        f"- 是否有不必要的文件或垃圾代码\n"
+        f"只输出一个数字分数，不要其他内容。"
+    )
     proc = subprocess.run(
-        [
-            "codex", "review",
-            f"评分这段代码变更 (0-10分)，只输出数字分数。\n\n{content}"
-        ],
+        [HERMES_BIN, "-z", review_prompt, "-t", "", "--yolo"],
         capture_output=True, text=True, timeout=180,
         cwd=CODEX_WORKDIR,
     )
