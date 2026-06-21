@@ -1,0 +1,48 @@
+"""codex_landing — 把审查结果发送回 Feishu
+
+在业务层我们没有自己的网络发送实现，只是把最终文本交给
+外部提供的 async callable ``send_reply``（在 feishu.py 中已经实现）。
+"""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+from typing import Callable
+
+
+async def post_result(
+    chat_id: str,
+    status: str,
+    result_msg: str,
+    md_path: Path | None = None,
+    patch_path: Path | None = None,
+    send_reply: Callable[[str], asyncio.Future] | None = None,
+) -> None:
+    """组织内容并通过 ``send_reply`` 回写到飞书会话。
+
+    参数
+    ----
+    * ``chat_id`` – 飞书会话 ID（在外层已决定）。
+    * ``status`` – ``success`` / ``failure``（仅日志使用）。
+    * ``result_msg`` – 人类可读的简要说明。
+    * ``md_path``/``patch_path`` – 生成的文件路径，若存在会嵌入正文。
+    * ``send_reply`` – async callable，接受字符串并负责发送。
+    """
+    parts = [result_msg]
+
+    if md_path and md_path.is_file():
+        parts.append("\n--- 审查报告 ---\n")
+        parts.append(md_path.read_text(encoding="utf-8"))
+
+    if patch_path and patch_path.is_file():
+        parts.append("\n--- Diff Patch ---\n")
+        parts.append(patch_path.read_text(encoding="utf-8"))
+
+    final_text = "\n".join(parts)
+
+    # 若外部未提供发送函数，直接打印（防止意外崩溃）。
+    if send_reply is None:
+        print(f"[Feishu Reply] chat_id={chat_id}:\n{final_text}")
+    else:
+        await send_reply(final_text)

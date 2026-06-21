@@ -3117,6 +3117,17 @@ class FeishuAdapter(BasePlatformAdapter):
             logger.debug("[Feishu] Ignoring empty text message id=%s", message_id)
             return
 
+        # Codex forwarding: intercept "codex ..." messages before agent dispatch
+        if text and text.lower().startswith("codex"):
+            chat_id = getattr(message, "chat_id", "") or ""
+            from .feishu_codex import handle_codex_message
+
+            async def _send_reply(content: str) -> None:
+                await self.send(chat_id, content)
+
+            asyncio.create_task(handle_codex_message(text, chat_id, _send_reply))
+            return  # Do not process as normal message
+
         if inbound_type != MessageType.COMMAND:
             hint = _build_mention_hint(mentions)
             if hint:
