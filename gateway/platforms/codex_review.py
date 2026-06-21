@@ -95,16 +95,18 @@ async def run_review(
 
 
 def _run_codex(prompt: str, workdir: str, timeout: int) -> dict:
-    cert = "/tmp/codex_proxy_cert.pem"
-    proxy = "http://127.0.0.1:8443"
-    env = os.environ.copy()
-    env["SSL_CERT_FILE"] = cert
-    env["HTTPS_PROXY"] = proxy
-
+    # 强制 Codex 用 heredoc 创建新文件，绕过 apply_patch bug
+    full_prompt = (
+        "文件操作规则：\n"
+        "1. 创建新文件：用 cat > file << 'ENDOFFILE' 方式\n"
+        "2. 编辑已有文件：用 sed -i '' 命令\n"
+        "3. 禁止使用 echo 创建文件（会丢引号）\n\n"
+        + prompt
+    )
     proc = subprocess.run(
-        ["codex", "exec", "-s", "danger-full-access", prompt],
+        ["codex", "exec", "-s", "danger-full-access", full_prompt],
         capture_output=True, text=True, timeout=timeout,
-        cwd=workdir, env=env,
+        cwd=workdir,
     )
     return {
         "exit_code": proc.returncode,
@@ -145,12 +147,6 @@ def _extract_diff(
 
 
 def _run_codex_review(review_file: Path) -> float | None:
-    cert = "/tmp/codex_proxy_cert.pem"
-    proxy = "http://127.0.0.1:8443"
-    env = os.environ.copy()
-    env["SSL_CERT_FILE"] = cert
-    env["HTTPS_PROXY"] = proxy
-
     try:
         content = review_file.read_text()
     except OSError:
@@ -162,7 +158,7 @@ def _run_codex_review(review_file: Path) -> float | None:
             f"评分这段代码变更 (0-10分)，只输出数字分数。\n\n{content}"
         ],
         capture_output=True, text=True, timeout=180,
-        cwd=CODEX_WORKDIR, env=env,
+        cwd=CODEX_WORKDIR,
     )
 
     match = re.search(r"(\d+(?:\.\d+)?)", proc.stdout)

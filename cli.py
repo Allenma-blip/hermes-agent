@@ -350,7 +350,7 @@ def _parse_service_tier_config(raw: str) -> str | None:
         return None
     if value in {"fast", "priority", "on"}:
         return "priority"
-    logger.warning("Unknown service_tier '%s', ignoring", raw)
+    logger.debug("Unknown service_tier '%s', ignoring", raw)
     return None
 
 def load_cli_config() -> Dict[str, Any]:

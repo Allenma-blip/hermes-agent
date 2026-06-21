@@ -3491,7 +3491,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             return None
         if value in {"fast", "priority", "on"}:
             return "priority"
-        logger.warning("Unknown service_tier '%s', ignoring", raw)
+        logger.debug("Unknown service_tier '%s', ignoring", raw)
         return None
 
     @staticmethod
