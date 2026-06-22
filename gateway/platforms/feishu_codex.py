@@ -34,7 +34,6 @@ async def handle_codex_message(
 
     # 2️⃣ 调用审查子模块
     from .codex_review import run_review
-    from .codex_landing import post_result
 
     project_name = "hermes-source"
     description = text
@@ -50,12 +49,12 @@ async def handle_codex_message(
         project_name, user_instruction
     )
 
-    # 3️⃣ 回写飞书
-    await post_result(
-        chat_id=chat_id,
-        status=status,
-        result_msg=result_msg,
-        md_path=md_path,
-        patch_path=patch_path,
-        send_reply=send_reply,
-    )
+    # 3️⃣ 回写飞书（用 lark-cli 直发，不依赖闭包 self.send，避免 gateway 重启后失效）
+    import subprocess
+    try:
+        subprocess.run(
+            ["lark-cli", "im", "send", "--chat-id", chat_id, "--text", result_msg],
+            capture_output=True, text=True, timeout=15,
+        )
+    except Exception as e:
+        logger.error("Failed to send Codex result via lark-cli: %s", e)
