@@ -3117,8 +3117,11 @@ class FeishuAdapter(BasePlatformAdapter):
             logger.debug("[Feishu] Ignoring empty text message id=%s", message_id)
             return
 
-        # Codex forwarding: intercept "codex ..." messages before agent dispatch
-        if text and text.lower().startswith("codex"):
+        # Codex forwarding: smart router (explicit "codex" prefix OR keyword matching)
+        logger.error("[Feishu] CODEX_CHECK: text=%r", text[:50] if text else None)
+        from .codex_router import should_route_to_codex as _should_route_to_codex
+        if text and _should_route_to_codex(text):
+            logger.error("[Feishu] CODEX_INTERCEPT: routing to feishu_codex")
             chat_id = getattr(message, "chat_id", "") or ""
             from .feishu_codex import handle_codex_message
 
