@@ -1,0 +1,12 @@
+---
+layout: patch
+title: "lazy: add lazy-export tests and import benchmark for gateway.platforms"
+labels: ["area:gateway", "feature", "tests"]
+---
+
+Create tests to validate PEP 562-based lazy exports for heavy adapters (QQAdapter/YuanbaoAdapter).
+Add a small import benchmark script to measure import time and peak memory for the package root import.
+
+Files added:
+- tests/test_lazy_exports.py
+- tools/import_benchmark.py
