@@ -152,7 +152,7 @@ _SAFE_FIXES = [
         re.compile(
             r'^(?P<indent>[ \t]*)echo[ \t]+(?!-)'
             r'(?P<content>(?:"[^"]*"|\'[^\']*\'|[^>\n])+?)'
-            r'[ \t]*>(?!>|&|=)[ \t]*(?P<file>[^>&/ \t][^ \t]*)',
+            r'(?<![-=])[ \t]*>(?!>|&|=)[ \t]*(?P<file>(?:/[^ \t]*|[^>& \t-][^ \t]*))',
             re.MULTILINE,
         ),
         r"\g<indent>printf '%s\n' \g<content> > \g<file>",
