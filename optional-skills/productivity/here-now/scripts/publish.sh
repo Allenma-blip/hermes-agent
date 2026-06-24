@@ -400,7 +400,7 @@ RESPONSE_EXPIRES=$(echo "$RESPONSE" | "$JQ_BIN" -r '.expiresAt // empty')
 [[ -n "$RESPONSE_EXPIRES" ]] && entry=$(echo "$entry" | "$JQ_BIN" --arg v "$RESPONSE_EXPIRES" '.expiresAt = $v')
 
 STATE=$(echo "$STATE" | "$JQ_BIN" --arg slug "$OUT_SLUG" --argjson e "$entry" '.publishes[$slug] = $e')
-echo "$STATE" | "$JQ_BIN" '.' > "$STATE_FILE"
+printf '%s\n' "$STATE" | "$JQ_BIN" '.' > "$STATE_FILE"
 
 # Output
 echo "$SITE_URL"

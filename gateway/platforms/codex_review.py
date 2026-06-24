@@ -54,25 +54,36 @@ async def run_review(
             f"错误:\n```\n{result['stderr']}\n```", None,
         )
 
-    # 2. 提取 diff（git diff + 新文件检测）
+    # 2. 安全修复（自动应用已知的非破坏性修复模式）
+    # 临时禁用：修复正则仍有边界情况（引号内 > 处理不完美）
+    # safe_fixes = _apply_safe_fixes(CODEX_WORKDIR)
+    safe_fixes = []
+
+    # 3. 提取 diff（git diff + 新文件检测）
     md_path, patch_path, new_files = _extract_diff(CODEX_WORKDIR, project_name)
     if md_path is None:
         # 无 git 变更但有新文件 → 列出新文件
         if new_files:
             files_list = "\n".join(f"- `{f}`" for f in new_files[:20])
+            safe_note = ""
+            if safe_fixes:
+                safe_note = f"\n\n🔧 自动修复 ({len(safe_fixes)} 处):\n" + "\n".join(f"- {f}" for f in safe_fixes)
             return (
                 Path(), Path(), "success",
                 f"✅ Codex 执行完成\n\n"
-                f"新增/修改文件 ({len(new_files)} 个):\n{files_list}\n\n"
+                f"新增/修改文件 ({len(new_files)} 个):\n{files_list}{safe_note}\n\n"
                 f"Codex 输出:\n```\n{result['stdout'][:500]}\n```", None,
             )
+        safe_note = ""
+        if safe_fixes:
+            safe_note = f"\n\n🔧 自动修复 ({len(safe_fixes)} 处):\n" + "\n".join(f"- {f}" for f in safe_fixes)
         return (
             Path(), Path(), "success",
             f"✅ Codex 执行完成\n\n"
-            f"输出:\n```\n{result['stdout'][:500]}\n```", None,
+            f"输出:\n```\n{result['stdout'][:500]}\n```{safe_note}", None,
         )
 
-    # 3. 评分（传用户原始指令，用于相关性检查）
+    # 4. 评分（传用户原始指令，用于相关性检查）
     score = _run_codex_review(md_path, prompt)
     if score is None:
         return (
@@ -81,7 +92,7 @@ async def run_review(
             None,
         )
 
-    # 4. 落地（≥9 自动 commit+push）
+    # 5. 落地（≥9 自动 commit+push）
     if score >= 9:
         verdict = "pass"
     elif score >= 7:
@@ -91,19 +102,23 @@ async def run_review(
 
     land_output = _run_landing(CODEX_WORKDIR, score, verdict)
 
+    safe_note = ""
+    if safe_fixes:
+        safe_note = f"\n\n🔧 自动修复 ({len(safe_fixes)} 处):\n" + "\n".join(f"- {f}" for f in safe_fixes)
+
     if verdict == "pass":
         result_msg = (
-            f"✅ 审核通过 ({score}/10)，已自动提交并推送\n{land_output}"
+            f"✅ 审核通过 ({score}/10)，已自动提交并推送\n{land_output}{safe_note}"
         )
     elif verdict == "warn":
         result_msg = (
             f"⚠️ 审核通过 ({score}/10)，已自动提交\n"
-            f"建议人工复查\n{land_output}"
+            f"建议人工复查\n{land_output}{safe_note}"
         )
     else:
         result_msg = (
             f"❌ 审核不通过 ({score}/10)，不落地\n"
-            f"审查报告: {md_path}\n完整 diff: {patch_path}"
+            f"审查报告: {md_path}\n完整 diff: {patch_path}{safe_note}"
         )
 
     return md_path, patch_path, "success", result_msg, score
@@ -128,6 +143,61 @@ def _run_codex(prompt: str, workdir: str, timeout: int) -> dict:
         "stdout": proc.stdout[-2000:],
         "stderr": proc.stderr[-500:],
     }
+
+
+# Safe fix patterns: (regex, replacement_template, description)
+# Applied automatically after Codex runs — no review needed.
+_SAFE_FIXES = [
+    (
+        # echo "content" > file  →  printf '%s\n' "content" > file
+        # Supports quoted strings, skips echo -n/-e options, skips >&2/>>/|//dev/null
+        re.compile(
+            r'^(?P<indent>[ \t]*)echo[ \t]+(?!-)'
+            r'(?P<content>(?:"[^"]*"|\'[^\']*\'|[^>\n])+?)'
+            r'[ \t]*>[ \t]*(?P<file>[^>&/][^ \t]*)',
+            re.MULTILINE,
+        ),
+        r"\g<indent>printf '%s\n' \g<content> > \g<file>",
+        "echo > file → printf '%s\n' > file",
+    ),
+]
+
+
+def _apply_safe_fixes(project_dir: str) -> list[str]:
+    """Scan shell scripts for safe fixable patterns and apply them.
+
+    Returns list of fix descriptions (empty if no fixes applied).
+    """
+    import glob
+    applied: list[str] = []
+    shell_patterns = ["*.sh", "*.bash"]
+    files: list[str] = []
+    for pat in shell_patterns:
+        files.extend(
+            glob.glob(os.path.join(project_dir, "**", pat), recursive=True)
+        )
+
+    for filepath in files:
+        try:
+            with open(filepath) as fh:
+                original = fh.read()
+        except OSError:
+            continue
+
+        modified = original
+        for regex, replacement, desc in _SAFE_FIXES:
+            if regex.search(modified):
+                modified = regex.sub(replacement, modified)
+                applied.append(f"{desc}: {os.path.relpath(filepath, project_dir)}")
+
+        if modified != original:
+            try:
+                with open(filepath, "w") as fh:
+                    fh.write(modified)
+            except OSError:
+                logger.warning("Failed to write safe fix: %s", filepath)
+
+    return applied
 
 
 def _extract_diff(

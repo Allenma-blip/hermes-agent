@@ -120,7 +120,7 @@ The publish script reads the API key from these sources (first match wins):
 To store a key, write it to the credentials file:
 
 ```bash
-mkdir -p ~/.herenow && echo "{API_KEY}" > ~/.herenow/credentials && chmod 600 ~/.herenow/credentials
+mkdir -p ~/.herenow && printf '%s\n' "{API_KEY}" > ~/.herenow/credentials && chmod 600 ~/.herenow/credentials
 ```
 
 **IMPORTANT**: After receiving an API key, save it immediately — run the command above yourself. Do not ask the user to run it manually. Avoid passing the key via CLI flags (e.g. `--api-key`) in interactive sessions; the credentials file is the preferred storage method.
@@ -152,7 +152,7 @@ curl -sS https://here.now/api/auth/agent/verify-code \
 5. Save the returned `apiKey` yourself (do not ask the user to do this):
 
 ```bash
-mkdir -p ~/.herenow && echo "{API_KEY}" > ~/.herenow/credentials && chmod 600 ~/.herenow/credentials
+mkdir -p ~/.herenow && printf '%s\n' "{API_KEY}" > ~/.herenow/credentials && chmod 600 ~/.herenow/credentials
 ```
 
 ## State file

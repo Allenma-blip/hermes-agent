@@ -94,7 +94,7 @@ nohup ssh -p 443 \
     -o ServerAliveCountMax=3 \
     -R0:localhost:8000 free@a.pinggy.io \
     > "$LOG" 2>&1 &
-echo $! > /tmp/pinggy-8000.pid
+printf '%s\n' "$!" > /tmp/pinggy-8000.pid
 ```
 
 `StrictHostKeyChecking=no` + `UserKnownHostsFile=/dev/null` skips the first-run host-key prompt. `ServerAliveInterval=30` keeps the SSH session from getting torn down by an idle NAT.

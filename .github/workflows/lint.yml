@@ -200,3 +200,34 @@ jobs:
 
       - name: Run footgun checker
         run: python scripts/check-windows-footguns.py --all
+
+  shell-echo-redirect:
+    # Flag ``echo … >`` (overwrite to file) in shell scripts — ``printf`` is
+    # preferred because ``echo`` behaviour varies across shells (backslash
+    # interpretation, ``-n`` handling).  ``echo … >&2`` (stderr) and
+    # ``echo … >>`` (append) are fine and not flagged.
+    # Advisory only — never blocks merge.
+    name: shell echo redirect (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Check for echo > file patterns
+        run: |
+          # Match: echo ... > file (but not >&2 stderr, not >> append, not pipe,
+          # not /dev/null).  grep -E for POSIX portability (macOS grep lacks -P).
+          matches=$(grep -rEn \
+            --include='*.sh' --include='*.bash' --include='SKILL.md' \
+            'echo[[:space:]]+.*[^>&|][[:space:]]*>[[:space:]]*[^>&]' \
+            scripts/ skills/ optional-skills/ docker/ \
+            2>/dev/null | grep -v '/dev/null' | grep -v '|' || true)
+          if [ -n "$matches" ]; then
+            echo "::warning::echo … > file patterns found — prefer printf:"
+            echo "$matches"
+            echo "---"
+            echo "Replace with: printf '%s\\n' \"content\" > file"
+          else
+            echo "No echo … > file patterns found."
+          fi

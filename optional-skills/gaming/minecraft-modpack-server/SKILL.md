@@ -59,7 +59,7 @@ This downloads libraries, patches the server jar, etc.
 
 ### 4. Accept EULA
 ```bash
-echo "eula=true" > ~/minecraft-server/server/eula.txt
+printf '%s\n' "eula=true" > ~/minecraft-server/server/eula.txt
 ```
 
 ### 5. Configure server.properties

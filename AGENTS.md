@@ -92,6 +92,12 @@ conservative at the waist.
 - **Contributor credit preserved.** Salvage external work by cherry-picking
   (rebase-merge) so authorship survives in git history; don't reimplement from
   scratch when you can build on top.
+- **Use `printf` instead of `echo` for file writes in shell scripts.**
+  `echo` behaviour varies across shells (backslash interpretation, `-n`
+  handling).  Always use `printf '%s\n' "content" > file` instead of
+  `echo "content" > file`.  `echo … >&2` (stderr) and `echo … >>` (append)
+  are fine and need no change.  A CI lint rule (`lint.yml` →
+  `shell-echo-redirect`) flags violations.
 
 ### What we don't want (rejected even when well-built)
 

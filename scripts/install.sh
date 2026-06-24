@@ -2649,7 +2649,7 @@ run_stage_body() {
             detect_os
             resolve_install_layout
             print_success
-            echo "git" > "$HERMES_HOME/.install_method"
+            printf '%s\n' "git" > "$HERMES_HOME/.install_method"
             ;;
         *)
             log_error "Unknown stage: $stage"
@@ -2728,7 +2728,7 @@ main() {
 
     print_success
 
-    echo "git" > "$HERMES_HOME/.install_method"
+    printf '%s\n' "git" > "$HERMES_HOME/.install_method"
 }
 
 if [ "$MANIFEST_MODE" = true ]; then
