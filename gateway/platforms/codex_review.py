@@ -55,9 +55,7 @@ async def run_review(
         )
 
     # 2. 安全修复（自动应用已知的非破坏性修复模式）
-    # 临时禁用：修复正则仍有边界情况（引号内 > 处理不完美）
-    # safe_fixes = _apply_safe_fixes(CODEX_WORKDIR)
-    safe_fixes = []
+    safe_fixes = _apply_safe_fixes(CODEX_WORKDIR)
 
     # 3. 提取 diff（git diff + 新文件检测）
     md_path, patch_path, new_files = _extract_diff(CODEX_WORKDIR, project_name)
@@ -154,7 +152,7 @@ _SAFE_FIXES = [
         re.compile(
             r'^(?P<indent>[ \t]*)echo[ \t]+(?!-)'
             r'(?P<content>(?:"[^"]*"|\'[^\']*\'|[^>\n])+?)'
-            r'[ \t]*>[ \t]*(?P<file>[^>&/][^ \t]*)',
+            r'[ \t]*>(?!>|&|=)[ \t]*(?P<file>[^>&/ \t][^ \t]*)',
             re.MULTILINE,
         ),
         r"\g<indent>printf '%s\n' \g<content> > \g<file>",

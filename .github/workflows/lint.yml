@@ -217,12 +217,13 @@ jobs:
       - name: Check for echo > file patterns
         run: |
           # Match: echo ... > file (but not >&2 stderr, not >> append, not pipe,
-          # not /dev/null).  grep -E for POSIX portability (macOS grep lacks -P).
+          # not /dev/null, not ->/=> arrows inside strings).
+          # grep -E for POSIX portability (macOS grep lacks -P).
           matches=$(grep -rEn \
             --include='*.sh' --include='*.bash' --include='SKILL.md' \
             'echo[[:space:]]+.*[^>&|][[:space:]]*>[[:space:]]*[^>&]' \
             scripts/ skills/ optional-skills/ docker/ \
-            2>/dev/null | grep -v '/dev/null' | grep -v '|' || true)
+            2>/dev/null | grep -v '/dev/null' | grep -v '|' | grep -v '>&2' | grep -v '>>' | grep -v '->' | grep -v '=>' || true)
           if [ -n "$matches" ]; then
             echo "::warning::echo … > file patterns found — prefer printf:"
             echo "$matches"
