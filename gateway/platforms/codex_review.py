@@ -143,22 +143,10 @@ def _run_codex(prompt: str, workdir: str, timeout: int) -> dict:
     }
 
 
-# Safe fix patterns: (regex, replacement_template, description)
-# Applied automatically after Codex runs — no review needed.
-_SAFE_FIXES = [
-    (
-        # echo "content" > file  →  printf '%s\n' "content" > file
-        # Supports quoted strings, skips echo -n/-e options, skips >&2/>>/|//dev/null
-        re.compile(
-            r'^(?P<indent>[ \t]*)echo[ \t]+(?!-)'
-            r'(?P<content>(?:"[^"]*"|\'[^\']*\'|[^>\n])+?)'
-            r'(?<![-=])[ \t]*>(?!>|&|=)[ \t]*(?P<file>(?:/[^ \t]*|[^>& \t-][^ \t]*))',
-            re.MULTILINE,
-        ),
-        r"\g<indent>printf '%s\n' \g<content> > \g<file>",
-        "echo > file → printf '%s\n' > file",
-    ),
-]
+# Safe fix patterns: DISABLED
+# The echo→printf auto-fix regex has proven unreliable (broke -> and => arrows twice).
+# Re-enabled only after a human-reviewed regex fix.
+_SAFE_FIXES = []
 
 
 def _apply_safe_fixes(project_dir: str) -> list[str]:
