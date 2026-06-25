@@ -54,7 +54,10 @@ async def run_review(
             f"错误:\n```\n{result['stderr']}\n```", None,
         )
 
-    # 2. 安全修复（自动应用已知的非破坏性修复模式）
+    # 2. ShellCheck 静态分析（只报告，不自动修复）
+    shellcheck_notes = _run_shellcheck(CODEX_WORKDIR)
+
+    # 3. 安全修复（自动应用已知的非破坏性修复模式）
     safe_fixes = _apply_safe_fixes(CODEX_WORKDIR)
 
     # 3. 提取 diff（git diff + 新文件检测）
@@ -66,19 +69,21 @@ async def run_review(
             safe_note = ""
             if safe_fixes:
                 safe_note = f"\n\n🔧 自动修复 ({len(safe_fixes)} 处):\n" + "\n".join(f"- {f}" for f in safe_fixes)
+            shellcheck_note = f"\n\n🔍 ShellCheck 警告:\n```\n{shellcheck_notes}\n```" if shellcheck_notes else ""
             return (
                 Path(), Path(), "success",
                 f"✅ Codex 执行完成\n\n"
-                f"新增/修改文件 ({len(new_files)} 个):\n{files_list}{safe_note}\n\n"
+                f"新增/修改文件 ({len(new_files)} 个):\n{files_list}{safe_note}{shellcheck_note}\n\n"
                 f"Codex 输出:\n```\n{result['stdout'][:500]}\n```", None,
             )
         safe_note = ""
         if safe_fixes:
             safe_note = f"\n\n🔧 自动修复 ({len(safe_fixes)} 处):\n" + "\n".join(f"- {f}" for f in safe_fixes)
+        shellcheck_note = f"\n\n🔍 ShellCheck 警告:\n```\n{shellcheck_notes}\n```" if shellcheck_notes else ""
         return (
             Path(), Path(), "success",
             f"✅ Codex 执行完成\n\n"
-            f"输出:\n```\n{result['stdout'][:500]}\n```{safe_note}", None,
+            f"输出:\n```\n{result['stdout'][:500]}\n```{safe_note}{shellcheck_note}", None,
         )
 
     # 4. 评分（传用户原始指令，用于相关性检查）
@@ -103,20 +108,21 @@ async def run_review(
     safe_note = ""
     if safe_fixes:
         safe_note = f"\n\n🔧 自动修复 ({len(safe_fixes)} 处):\n" + "\n".join(f"- {f}" for f in safe_fixes)
+    shellcheck_note = f"\n\n🔍 ShellCheck 警告:\n```\n{shellcheck_notes}\n```" if shellcheck_notes else ""
 
     if verdict == "pass":
         result_msg = (
-            f"✅ 审核通过 ({score}/10)，已自动提交并推送\n{land_output}{safe_note}"
+            f"✅ 审核通过 ({score}/10)，已自动提交并推送\n{land_output}{safe_note}{shellcheck_note}"
         )
     elif verdict == "warn":
         result_msg = (
             f"⚠️ 审核通过 ({score}/10)，已自动提交\n"
-            f"建议人工复查\n{land_output}{safe_note}"
+            f"建议人工复查\n{land_output}{safe_note}{shellcheck_note}"
         )
     else:
         result_msg = (
             f"❌ 审核不通过 ({score}/10)，不落地\n"
-            f"审查报告: {md_path}\n完整 diff: {patch_path}{safe_note}"
+            f"审查报告: {md_path}\n完整 diff: {patch_path}{safe_note}{shellcheck_note}"
         )
 
     return md_path, patch_path, "success", result_msg, score
@@ -260,6 +266,39 @@ def _run_codex_review(review_file: Path, user_prompt: str = "") -> float | None:
     if match:
         return float(match.group(1))
     return None
+
+
+def _run_shellcheck(project_dir: str) -> str:
+    """Run ShellCheck on all shell scripts and return warnings."""
+    import glob
+    shell_patterns = ["*.sh", "*.bash"]
+    files: list[str] = []
+    for pat in shell_patterns:
+        files.extend(glob.glob(os.path.join(project_dir, "**", pat), recursive=True))
+
+    if not files:
+        return ""
+
+    warnings: list[str] = []
+    for filepath in files:
+        try:
+            proc = subprocess.run(
+                ["shellcheck", filepath],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if proc.returncode != 0 and proc.stdout.strip():
+                rel = os.path.relpath(filepath, project_dir)
+                for line in proc.stdout.strip().splitlines():
+                    warnings.append(f"{rel}: {line}")
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+
+    if not warnings:
+        return ""
+
+    return "\n".join(warnings[:50])  # cap at 50 lines
 
 
 def _run_landing(project_dir: str, score: float, verdict: str) -> str:
