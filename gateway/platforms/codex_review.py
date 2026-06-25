@@ -55,12 +55,16 @@ async def run_review(
         )
 
     # 2. ShellCheck 静态分析（只报告，不自动修复）
-    shellcheck_notes = _run_shellcheck(CODEX_WORKDIR)
+    shellcheck_notes, sc2028_issues = _run_shellcheck(CODEX_WORKDIR)
 
     # 3. 安全修复（自动应用已知的非破坏性修复模式）
     safe_fixes = _apply_safe_fixes(CODEX_WORKDIR)
 
-    # 3. 提取 diff（git diff + 新文件检测）
+    # 3b. SC2028 保守自动修复（echo → printf，只修复 ShellCheck 报警的行）
+    sc2028_fixes = _apply_sc2028_fixes(CODEX_WORKDIR, sc2028_issues)
+    safe_fixes = safe_fixes + sc2028_fixes
+
+    # 4. 提取 diff（git diff + 新文件检测）
     md_path, patch_path, new_files = _extract_diff(CODEX_WORKDIR, project_name)
     if md_path is None:
         # 无 git 变更但有新文件 → 列出新文件
@@ -86,7 +90,7 @@ async def run_review(
             f"输出:\n```\n{result['stdout'][:500]}\n```{safe_note}{shellcheck_note}", None,
         )
 
-    # 4. 评分（传用户原始指令，用于相关性检查）
+    # 5. 评分（传用户原始指令，用于相关性检查）
     score = _run_codex_review(md_path, prompt)
     if score is None:
         return (
@@ -192,6 +196,79 @@ def _apply_safe_fixes(project_dir: str) -> list[str]:
     return applied
 
 
+def _apply_sc2028_fixes(project_dir: str, issues: list[dict]) -> list[str]:
+    """Conservative auto-fix for ShellCheck SC2028 only.
+
+    Rules:
+    - Only fix lines that ShellCheck actually flagged as SC2028
+    - Skip lines containing -> >= => /dev/null >&2 >> or other risky patterns
+    - Replace echo "..." with printf '%s\n' "..."
+    """
+    import glob
+    applied: list[str] = []
+
+    # Group issues by file for efficient processing
+    issues_by_file: dict[str, list[dict]] = {}
+    for issue in issues:
+        f = issue["file"]
+        if f not in issues_by_file:
+            issues_by_file[f] = []
+        issues_by_file[f].append(issue)
+
+    for filepath, file_issues in issues_by_file.items():
+        try:
+            with open(filepath) as fh:
+                lines = fh.readlines()
+        except OSError:
+            continue
+
+        # Build set of 0-based line indices to fix
+        fix_lines = {i["line"] - 1 for i in file_issues}
+
+        modified_lines = []
+        file_changed = False
+        for i, line in enumerate(lines):
+            if i not in fix_lines:
+                modified_lines.append(line)
+                continue
+
+            stripped = line.rstrip("\n")
+            indent = stripped[: len(stripped) - len(stripped.lstrip())]
+            rest = stripped.lstrip()
+
+            # Only process echo lines
+            if not rest.startswith("echo "):
+                modified_lines.append(line)
+                continue
+
+            # Skip if contains risky patterns
+            risky = ["->", "=>", ">=", "/dev/null", ">&2", ">>"]
+            if any(p in rest for p in risky):
+                modified_lines.append(line)
+                continue
+
+            content = rest[5:].strip()
+            if not content:
+                modified_lines.append(line)
+                continue
+
+            new_line = f'{indent}printf \'%s\\n\' {content}\n'
+            modified_lines.append(new_line)
+            file_changed = True
+            applied.append(
+                f"SC2028: {os.path.relpath(filepath, project_dir)}:{i+1}"
+            )
+
+        if file_changed:
+            try:
+                with open(filepath, "w") as fh:
+                    fh.writelines(modified_lines)
+            except OSError:
+                logger.warning("Failed to write SC2028 fix: %s", filepath)
+
+    return applied
+
+
 def _extract_diff(
     project_dir: str, project_name: str
 ) -> tuple[Path | None, Path | None, list[str]]:
@@ -266,20 +343,27 @@ def _run_codex_review(review_file: Path, user_prompt: str = "") -> float | None:
     if match:
         return float(match.group(1))
     return None
-
-
-def _run_shellcheck(project_dir: str) -> str:
-    """Run ShellCheck on all shell scripts and return warnings."""
+def _run_shellcheck(project_dir: str) -> tuple[str, list[dict]]:
+    """Run ShellCheck on all shell scripts.
+    
+    Returns:
+        (formatted_warnings, sc2028_issues)
+        - formatted_warnings: 用于显示的所有警告文本
+        - sc2028_issues: 结构化的 SC2028 问题列表 [{"file": str, "line": int, "text": str}, ...]
+    """
     import glob
     shell_patterns = ["*.sh", "*.bash"]
     files: list[str] = []
     for pat in shell_patterns:
-        files.extend(glob.glob(os.path.join(project_dir, "**", pat), recursive=True))
+        files.extend(
+            glob.glob(os.path.join(project_dir, "**", pat), recursive=True)
+        )
 
     if not files:
-        return ""
+        return "", []
 
     warnings: list[str] = []
+    sc2028_issues: list[dict] = []
     for filepath in files:
         try:
             proc = subprocess.run(
@@ -292,13 +376,21 @@ def _run_shellcheck(project_dir: str) -> str:
                 rel = os.path.relpath(filepath, project_dir)
                 for line in proc.stdout.strip().splitlines():
                     warnings.append(f"{rel}: {line}")
+                    # Parse SC2028: "line 42: echo ..." pattern
+                    if "SC2028" in line:
+                        m = re.match(rf"{re.escape(rel)}:(\d+):\d+:(.*)", line)
+                        if m:
+                            sc2028_issues.append({
+                                "file": filepath,
+                                "rel": rel,
+                                "line": int(m.group(1)),
+                                "text": m.group(2).strip(),
+                            })
         except (OSError, subprocess.TimeoutExpired):
             continue
 
-    if not warnings:
-        return ""
-
-    return "\n".join(warnings[:50])  # cap at 50 lines
+    formatted = "\n".join(warnings[:50])
+    return formatted, sc2028_issues
 
 
 def _run_landing(project_dir: str, score: float, verdict: str) -> str:
