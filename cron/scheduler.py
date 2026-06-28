@@ -787,15 +787,25 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
                             send_result
                             and thread_id
                             and getattr(send_result, "raw_response", None)
-                            and send_result.raw_response.get("thread_fallback")
                         ):
-                            requested_thread_id = send_result.raw_response.get("requested_thread_id") or thread_id
-                            msg = (
-                                f"configured thread_id {requested_thread_id} for "
-                                f"{platform_name}:{chat_id} was not found; delivered without thread_id"
+                            _raw = send_result.raw_response
+                            _thread_fallback = (
+                                _raw.get("thread_fallback")
+                                if isinstance(_raw, dict)
+                                else getattr(_raw, "thread_fallback", None)
                             )
-                            logger.warning("Job '%s': %s", job["id"], msg)
-                            delivery_errors.append(msg)
+                            if _thread_fallback:
+                                _requested_thread_id = (
+                                    _raw.get("requested_thread_id")
+                                    if isinstance(_raw, dict)
+                                    else getattr(_raw, "requested_thread_id", None)
+                                ) or thread_id
+                                msg = (
+                                    f"configured thread_id {_requested_thread_id} for "
+                                    f"{platform_name}:{chat_id} was not found; delivered without thread_id"
+                                )
+                                logger.warning("Job '%s': %s", job["id"], msg)
+                                delivery_errors.append(msg)
 
                 # Send extracted media files as native attachments via the live adapter
                 if adapter_ok and media_files:
