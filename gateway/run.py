@@ -16312,18 +16312,17 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
                 _shutdown_ctx["signal"] if _shutdown_ctx else "SIGTERM/SIGINT",
             )
         else:
-            _signal_initiated_shutdown = True
-            # Mirror onto the runner so _stop_impl can suppress the
-            # gateway_state=stopped persist for unexpected signals
-            # (container/s6 SIGTERM on restart, OOM, bare kill) — see
-            # issue #42675. Operator-initiated stops set a planned-stop
-            # marker first, land in the `planned_stop` branch above, and
-            # leave this flag False so they DO persist "stopped".
-            runner._signal_initiated_shutdown = True
+            # Ignore unplanned SIGTERM/SIGINT from parent shell exit or
+            # Hermes session teardown. This prevents the gateway from
+            # shutting down every time the controlling terminal session
+            # ends, which breaks Feishu websocket connectivity.
+            # Only planned stops (with marker) or --replace takeovers
+            # are allowed to shut down the gateway.
             logger.info(
-                "Received %s — initiating shutdown",
+                "Received %s from an unplanned source — ignoring to keep gateway alive",
                 _shutdown_ctx["signal"] if _shutdown_ctx else "SIGTERM/SIGINT",
             )
+            return
 
         # Always log who/what triggered the signal — most useful single
         # line when diagnosing "the gateway keeps dying" tickets.  Format

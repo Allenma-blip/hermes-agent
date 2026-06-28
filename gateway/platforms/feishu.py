@@ -1292,6 +1292,7 @@ def _run_official_feishu_ws_client(ws_client: Any, adapter: Any) -> None:
 
     original_connect = ws_client_module.websockets.connect
     original_configure = getattr(ws_client, "_configure", None)
+    original_get_conn_url = getattr(ws_client, "_get_conn_url", None)
 
     def _apply_runtime_ws_overrides() -> None:
         try:
@@ -1307,7 +1308,30 @@ def _run_official_feishu_ws_client(ws_client: Any, adapter: Any) -> None:
             kwargs["ping_interval"] = adapter._ws_ping_interval
         if adapter._ws_ping_timeout is not None and "ping_timeout" not in kwargs:
             kwargs["ping_timeout"] = adapter._ws_ping_timeout
+        # Bypass SSL verification for websocket connections through local proxy
+        if "ssl" not in kwargs:
+            import ssl as _ssl
+            _ssl_context = _ssl.create_default_context()
+            _ssl_context.check_hostname = False
+            _ssl_context.verify_mode = _ssl.CERT_NONE
+            kwargs["ssl"] = _ssl_context
         return original_connect(*args, **kwargs)
+
+    def _get_conn_url_with_ssl_bypass(*args: Any, **kwargs: Any) -> Any:
+        # Patch requests.post inside _get_conn_url to bypass SSL verification
+        if original_get_conn_url is None:
+            return None
+        import requests as _req
+        _orig_post = _req.post
+        def _post_with_no_verify(*a, **kw):
+            if "verify" not in kw:
+                kw["verify"] = False
+            return _orig_post(*a, **kw)
+        _req.post = _post_with_no_verify
+        try:
+            return original_get_conn_url(*args, **kwargs)
+        finally:
+            _req.post = _orig_post
 
     def _configure_with_overrides(conf: Any) -> Any:
         if original_configure is None:
@@ -1319,6 +1343,8 @@ def _run_official_feishu_ws_client(ws_client: Any, adapter: Any) -> None:
     ws_client_module.websockets.connect = _connect_with_overrides
     if original_configure is not None:
         setattr(ws_client, "_configure", _configure_with_overrides)
+    if original_get_conn_url is not None:
+        setattr(ws_client, "_get_conn_url", _get_conn_url_with_ssl_bypass)
     _apply_runtime_ws_overrides()
     try:
         ws_client.start()
@@ -1328,6 +1354,8 @@ def _run_official_feishu_ws_client(ws_client: Any, adapter: Any) -> None:
         ws_client_module.websockets.connect = original_connect
         if original_configure is not None:
             setattr(ws_client, "_configure", original_configure)
+        if original_get_conn_url is not None:
+            setattr(ws_client, "_get_conn_url", original_get_conn_url)
         pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
         for task in pending:
             task.cancel()
@@ -4681,7 +4709,50 @@ class FeishuAdapter(BasePlatformAdapter):
         self._webhook_site = web.TCPSite(self._webhook_runner, self._webhook_host, self._webhook_port)
         await self._webhook_site.start()
 
+    _ssl_bypass_applied = False
+
     def _build_lark_client(self, domain: Any) -> Any:
+        if not FeishuAdapter._ssl_bypass_applied:
+            FeishuAdapter._ssl_bypass_applied = True
+            try:
+                import requests as _req
+                import httpx as _httpx
+                import ssl as _ssl
+
+                _ssl_ctx = _ssl.create_default_context()
+                _ssl_ctx.check_hostname = False
+                _ssl_ctx.verify_mode = _ssl.CERT_NONE
+
+                _orig_req_session_request = _req.Session.request
+                def _session_request_no_verify(self, method, url, **kwargs):
+                    if "verify" not in kwargs:
+                        kwargs["verify"] = False
+                    return _orig_req_session_request(self, method, url, **kwargs)
+                _req.Session.request = _session_request_no_verify
+
+                _orig_req_post = _req.post
+                def _post_no_verify(*args, **kwargs):
+                    if "verify" not in kwargs:
+                        kwargs["verify"] = False
+                    return _orig_req_post(*args, **kwargs)
+                _req.post = _post_no_verify
+
+                _orig_httpx_client_init = _httpx.Client.__init__
+                def _client_init_no_verify(self, *args, **kwargs):
+                    if "verify" not in kwargs:
+                        kwargs["verify"] = _ssl_ctx
+                    return _orig_httpx_client_init(self, *args, **kwargs)
+                _httpx.Client.__init__ = _client_init_no_verify
+
+                _orig_httpx_async_init = _httpx.AsyncClient.__init__
+                def _async_client_init_no_verify(self, *args, **kwargs):
+                    if "verify" not in kwargs:
+                        kwargs["verify"] = _ssl_ctx
+                    return _orig_httpx_async_init(self, *args, **kwargs)
+                _httpx.AsyncClient.__init__ = _async_client_init_no_verify
+            except Exception:
+                pass
+
         return (
             lark.Client.builder()
             .app_id(self._app_id)
